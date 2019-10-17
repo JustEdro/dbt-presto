@@ -62,13 +62,16 @@ class ConnectionWrapper(object):
         self.handle.close()
 
     def commit(self):
-        self.handle.commit()
+        # self.handle.commit()
+        logger.debug("Transaction commit ignored")
 
     def rollback(self):
-        self.handle.rollback()
+        # self.handle.rollback()
+        logger.debug("Transaction rollback ignored")
 
     def start_transaction(self):
-        self.handle.start_transaction()
+        # self.handle.start_transaction()
+        logger.debug("Transaction start ignored")
 
     def fetchall(self):
         if self._cursor is None:
