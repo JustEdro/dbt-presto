@@ -12,7 +12,7 @@ from dbt.logger import GLOBAL_LOGGER as logger
 
 import prestodb
 from prestodb.transaction import IsolationLevel
-from prestodb.auth import KerberosAuthentication
+from prestodb.auth import KerberosAuthentication, BasicAuthentication
 import sqlparse
 
 
@@ -29,6 +29,12 @@ PRESTO_CREDENTIALS_CONTRACT = {
         'host': {
             'type': 'string',
         },
+        'username': {
+            'type': 'string',
+        },
+        'password': {
+            'type': 'string',
+        },
         'port': {
             'type': 'integer',
             'minimum': 0,
@@ -37,7 +43,7 @@ PRESTO_CREDENTIALS_CONTRACT = {
         'method': {
             # TODO: what do most people use? Kerberos is what the official one
             # implements.
-            'enum': ['none', 'kerberos'],
+            'enum': ['none', 'kerberos', 'basic'],
         },
         'userinfo-json': {
             'type': 'object',
@@ -177,8 +183,13 @@ class PrestoConnectionManager(SQLConnectionManager):
         credentials = connection.credentials
         if credentials.method == 'kerberos':
             auth = KerberosAuthentication()
+            scheme = 'http'
+        elif credentials.method == 'basic':
+            auth = BasicAuthentication(credentials.get('username'), credentials.get('password'))
+            scheme = 'https'
         else:
             auth = prestodb.constants.DEFAULT_AUTH
+            scheme = 'http'
 
         # it's impossible for presto to fail here as 'connections' are actually
         # just cursor factories.
@@ -190,6 +201,7 @@ class PrestoConnectionManager(SQLConnectionManager):
             schema=credentials.schema,
             auth=auth,
             isolation_level=IsolationLevel.AUTOCOMMIT,
+            http_scheme=scheme
         )
         connection.state = 'open'
         connection.handle = ConnectionWrapper(presto_conn)

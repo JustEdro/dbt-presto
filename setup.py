@@ -9,8 +9,8 @@ with open(os.path.join(this_directory, 'README.md')) as f:
 
 
 package_name = "dbt-presto"
-package_version = "0.14.0"
-description = """The presto adpter plugin for dbt (data build tool)"""
+package_version = "0.14.3"
+description = """The presto adapter plugin for dbt (data build tool)"""
 
 setup(
     name=package_name,

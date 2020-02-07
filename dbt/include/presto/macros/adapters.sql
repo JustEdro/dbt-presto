@@ -114,3 +114,10 @@
   {%- endcall %}
   {{ return(load_result('check_schema_exists').table) }}
 {% endmacro %}
+
+
+{% macro presto__create_schema(database_name, schema_name) -%}
+    {%- call statement('create_schema') -%}
+        create schema if not exists {{database_name}}.{{schema_name}}
+    {% endcall %}
+{% endmacro %}
