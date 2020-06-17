@@ -1,62 +1,31 @@
-from collections import Iterable
 from contextlib import contextmanager
-from datetime import datetime
-from getpass import getuser
-import re
 
+import dbt.exceptions
 from dbt.adapters.base import Credentials
 from dbt.adapters.sql import SQLConnectionManager
-from dbt.compat import basestring, NUMBERS, to_string
-from dbt.exceptions import RuntimeException
 from dbt.logger import GLOBAL_LOGGER as logger
 
+from dataclasses import dataclass
+from typing import Optional
+from dbt.helper_types import Port
+
+from datetime import datetime
+import decimal
+import re
 import prestodb
 from prestodb.transaction import IsolationLevel
-from prestodb.auth import KerberosAuthentication, BasicAuthentication
 import sqlparse
 
 
-PRESTO_CREDENTIALS_CONTRACT = {
-    'type': 'object',
-    'additionalProperties': False,
-    'properties': {
-        'database': {
-            'type': 'string',
-        },
-        'schema': {
-            'type': 'string',
-        },
-        'host': {
-            'type': 'string',
-        },
-        'username': {
-            'type': 'string',
-        },
-        'password': {
-            'type': 'string',
-        },
-        'port': {
-            'type': 'integer',
-            'minimum': 0,
-            'maximum': 65535,
-        },
-        'method': {
-            # TODO: what do most people use? Kerberos is what the official one
-            # implements.
-            'enum': ['none', 'kerberos', 'basic'],
-        },
-        'userinfo-json': {
-            'type': 'object',
-        },
-    },
-    'required': ['database', 'schema', 'host', 'port'],
-}
-
-
+@dataclass
 class PrestoCredentials(Credentials):
-    SCHEMA = PRESTO_CREDENTIALS_CONTRACT
-    ALIASES = {
-        'catalog': 'database',
+    host: str
+    port: Port
+    user: str
+    password: Optional[str]
+    method: Optional[str]
+    _ALIASES = {
+        'catalog': 'database'
     }
 
     @property
@@ -64,7 +33,7 @@ class PrestoCredentials(Credentials):
         return 'presto'
 
     def _connection_keys(self):
-        return ('host', 'port', 'database', 'username')
+        return ('host', 'port', 'user', 'database', 'schema')
 
 
 class ConnectionWrapper(object):
@@ -93,16 +62,13 @@ class ConnectionWrapper(object):
         self.handle.close()
 
     def commit(self):
-        # self.handle.commit()
-        logger.debug("Transaction commit ignored")
+        self.handle.commit()
 
     def rollback(self):
-        # self.handle.rollback()
-        logger.debug("Transaction rollback ignored")
+        self.handle.rollback()
 
     def start_transaction(self):
-        # self.handle.start_transaction()
-        logger.debug("Transaction start ignored")
+        self.handle.start_transaction()
 
     def fetchall(self):
         if self._cursor is None:
@@ -137,11 +103,12 @@ class ConnectionWrapper(object):
 
         I think "'" (a single quote) is the only character that matters.
         """
+        numbers = (decimal.Decimal, int, float)
         if value is None:
             return 'NULL'
-        elif isinstance(value, basestring):
+        elif isinstance(value, str):
             return "'{}'".format(value.replace("'", "''"))
-        elif isinstance(value, NUMBERS):
+        elif isinstance(value, numbers):
             return value
         elif isinstance(value, datetime):
             time_formatted = value.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
@@ -162,7 +129,7 @@ class PrestoConnectionManager(SQLConnectionManager):
         except Exception as exc:
             logger.debug("Error while running:\n{}".format(sql))
             logger.debug(exc)
-            raise RuntimeException(to_string(exc))
+            raise dbt.exceptions.RuntimeException(str(exc))
 
     def add_begin_query(self):
         connection = self.get_thread_connection()
@@ -181,27 +148,30 @@ class PrestoConnectionManager(SQLConnectionManager):
             return connection
 
         credentials = connection.credentials
-        if credentials.method == 'kerberos':
-            auth = KerberosAuthentication()
-            scheme = 'http'
-        elif credentials.method == 'basic':
-            auth = BasicAuthentication(credentials.get('username'), credentials.get('password'))
-            scheme = 'https'
+        if credentials.method == 'ldap':
+            auth = prestodb.auth.BasicAuthentication(
+                credentials.user,
+                credentials.password,
+            )
+            http_scheme = "https"
+        elif credentials.method == 'kerberos':
+            auth = prestodb.auth.KerberosAuthentication()
+            http_scheme = "https"
         else:
             auth = prestodb.constants.DEFAULT_AUTH
-            scheme = 'http'
+            http_scheme = "http"
 
         # it's impossible for presto to fail here as 'connections' are actually
         # just cursor factories.
         presto_conn = prestodb.dbapi.connect(
             host=credentials.host,
-            port=credentials.get('port', 8080),
-            user=credentials.get('username', getuser()),
+            port=credentials.port,
+            user=credentials.user,
             catalog=credentials.database,
             schema=credentials.schema,
+            http_scheme=http_scheme,
             auth=auth,
-            isolation_level=IsolationLevel.AUTOCOMMIT,
-            http_scheme=scheme
+            isolation_level=IsolationLevel.AUTOCOMMIT
         )
         connection.state = 'open'
         connection.handle = ConnectionWrapper(presto_conn)
@@ -244,11 +214,12 @@ class PrestoConnectionManager(SQLConnectionManager):
             )
 
         if cursor is None:
-            raise RuntimeException(
-                    "Tried to run an empty query on model '{}'. If you are "
-                    "conditionally running\nsql, eg. in a model hook, make "
-                    "sure your `else` clause contains valid sql!\n\n"
-                    "Provided SQL:\n{}".format(connection.name, sql))
+            raise dbt.exceptions.RuntimeException(
+                "Tried to run an empty query on model '{}'. If you are "
+                "conditionally running\nsql, eg. in a model hook, make "
+                "sure your `else` clause contains valid sql!\n\n"
+                "Provided SQL:\n{}".format(connection.name, sql)
+            )
 
         return connection, cursor
 

@@ -1,4 +1,8 @@
-## dbt-presto ([docs](https://docs.getdbt.com/docs/profile-presto#section-required-configuration))
+## dbt-presto
+
+### Documentation
+For more information on using Spark with dbt, consult the dbt documentation:
+- [Presto profile](https://docs.getdbt.com/docs/profile-presto)
 
 ### Installation
 This plugin can be installed via pip:
@@ -12,7 +16,9 @@ A dbt profile can be configured to run against Presto using the following config
 
 | Option  | Description                                        | Required?               | Example                  |
 |---------|----------------------------------------------------|-------------------------|--------------------------|
-| method  | The Presto authentication method to use | Optional(default=`none`)  | `none`|`kerberos` |
+| method  | The Presto authentication method to use | Optional (default=`none`)  | `none`|`kerberos` |
+| user  | Username for authentication | Required  | `none`|`drew` |
+| password  | Password for authentication | Optional (required if `method` is `ldap|kerberos`)  | `none`|`abc123` |
 | database  | Specify the database to build models into | Required  | `analytics` |
 | schema  | Specify the schema to build models into | Required | `dbt_drew` |
 | host    | The hostname to connect to | Required | `127.0.0.1`  |
@@ -28,11 +34,11 @@ my-presto-db:
   outputs:
     dev:
       type: presto
-      method: none
+      user: drew
       host: 127.0.0.1
       port: 8080
       database: analytics
-      schema: dbt_dbanin
+      schema: dbt_drew
       threads: 8
 ```
 
@@ -64,12 +70,16 @@ hive.allow-rename-table=true
 -   Want to report a bug or request a feature? Let us know on [Slack](http://slack.getdbt.com/), or open [an issue](https://github.com/fishtown-analytics/dbt-presto/issues/new).
 
 ### Running tests
+Build dbt container locally:
+
+```
+./docker/dbt/build.sh
+```
 
 Run a Presto server locally:
 
 ```
-cd docker/
-./init.bash
+./docker/init.bash
 ```
 
 If you see errors while about "inconsistent state" while bringing up presto,
@@ -95,6 +105,18 @@ create schema public;
 ```
 
 You probably should be slightly less reckless than this.
+
+Run tests against Presto:
+
+```
+./docker/run_tests.bash
+```
+
+Run the locally-built docker image (from docker/dbt/build.sh):
+```
+export DBT_PROJECT_DIR=$HOME/... # wherever the dbt project you want to run is
+docker run -it --mount "type=bind,source=$HOME/.dbt/,target=/home/dbt_user/.dbt" --mount="type=bind,source=$DBT_PROJECT_DIR,target=/usr/app" --network dbt-net dbt-presto /bin/bash
+```
 
 ## Code of Conduct
 

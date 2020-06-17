@@ -38,7 +38,7 @@
 {% endmacro %}
 
 
-{% macro presto__list_relations_without_caching(information_schema, schema) %}
+{% macro presto__list_relations_without_caching(relation) %}
   {% call statement('list_relations_without_caching', fetch_result=True) -%}
     select
       table_catalog as database,
@@ -48,16 +48,16 @@
            when table_type = 'VIEW' then 'view'
            else table_type
       end as table_type
-    from {{ information_schema }}.tables
-    where {{ presto_ilike('table_schema', schema) }}
+    from {{ relation.information_schema() }}.tables
+    where {{ presto_ilike('table_schema', relation.schema) }}
   {% endcall %}
   {{ return(load_result('list_relations_without_caching').table) }}
 {% endmacro %}
 
 
-{% macro presto__reset_csv_table(model, full_refresh, old_relation) %}
+{% macro presto__reset_csv_table(model, full_refresh, old_relation, agate_table) %}
     {{ adapter.drop_relation(old_relation) }}
-    {{ return(create_csv_table(model)) }}
+    {{ return(create_csv_table(model, agate_table)) }}
 {% endmacro %}
 
 
@@ -70,6 +70,15 @@
 {% endmacro %}
 
 
+{% macro presto__create_view_as(relation, sql) -%}
+  create or replace view
+    {{ relation }}
+  as
+    {{ sql }}
+  ;
+{% endmacro %}
+
+
 {% macro presto__drop_relation(relation) -%}
   {% call statement('drop_relation', auto_begin=False) -%}
     drop {{ relation.type }} if exists {{ relation }}
@@ -77,22 +86,36 @@
 {% endmacro %}
 
 
-{% macro presto__drop_schema(database_name, schema_name) -%}
+{# see this issue: https://github.com/fishtown-analytics/dbt/issues/2267 #}
+{% macro presto__information_schema_name(database) -%}
+  {%- if database -%}
+    {{ database }}.INFORMATION_SCHEMA
+  {%- else -%}
+    INFORMATION_SCHEMA
+  {%- endif -%}
+{%- endmacro %}
+
+
+{# On Presto, 'cascade' isn't supported so we have to manually cascade. #}
+{% macro presto__drop_schema(relation) -%}
+  {% for relation in adapter.list_relations(relation.database, relation.schema) %}
+    {% do drop_relation(relation) %}
+  {% endfor %}
   {%- call statement('drop_schema') -%}
-    drop schema if exists {{database_name}}.{{schema_name}}
+    drop schema if exists {{ relation }}
   {% endcall %}
 {% endmacro %}
 
 
 {% macro presto__rename_relation(from_relation, to_relation) -%}
   {% call statement('rename_relation') -%}
-    alter table {{ from_relation }} rename to {{ to_relation }}
+    alter {{ from_relation.type }} {{ from_relation }} rename to {{ to_relation }}
   {%- endcall %}
 {% endmacro %}
 
 
-{% macro presto__load_csv_rows(model) %}
-  {{ return(basic_load_csv_rows(model, 1000)) }}
+{% macro presto__load_csv_rows(model, agate_table) %}
+  {{ return(basic_load_csv_rows(model, 1000, agate_table)) }}
 {% endmacro %}
 
 
